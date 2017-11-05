@@ -1,4 +1,4 @@
-Some parts of samer_samer.png are form minetest_game:
+Some parts of samer_samer- .png, .blend and .b3d are copied form minetest_game:
 
 Licenses of media (textures, models and sounds)
 -----------------------------------------------
