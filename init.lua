@@ -73,7 +73,7 @@ local function node_to_ent(pos, meta, code)
 	return id
 end
 
-local function ent_to_node(id)
+local function ent_to_node(id, msg)
 	local luaent = minetest.luaentities[samer_ids[id]]
 	local obj = luaent.object
 	local pos = obj:get_pos()
@@ -81,6 +81,7 @@ local function ent_to_node(id)
 			{name = "samer:samer", param2 = yaw_to_param2(obj:get_yaw())})
 	local meta = minetest.get_meta(pos)
 	meta:set_string("code", luaent.code)
+	meta:set_string("msg", msg or "")
 	local old_inv = get_inv(id)
 	local inv = meta:get_inventory()
 	if old_inv then
@@ -93,6 +94,8 @@ end
 
 
 -- running the code:
+
+local max_events = tonumber(minetest.settings:get("samer.max_events")) or 10000
 
 local waiting_threads = {}
 
@@ -128,7 +131,7 @@ local function create_environment(id)
 		end,
 		turn = function(dir)
 			if type(dir) ~= "number" then
-				error()
+				error("attempt to turn with "..tostring(dir), 2)
 			end
 			dir = math.sign(dir)
 			local obj = minetest.object_refs[samer_ids[id]]
@@ -150,7 +153,9 @@ local function create_environment(id)
 end
 
 local function create_thread(func, env)
-	-- todo: do more for safety
+	if rawget(_G, "jit") then
+		jit.off(func, true)
+	end
 	setfenv(func, env)
 	return coroutine.create(pcall), func
 end
@@ -160,11 +165,19 @@ local function run(id, thread, func)
 		waiting_threads[id] = thread
 		return
 	end
-	local ok, msg = coroutine.resume(thread, func)
+	local ok, msg, errmsg
+	pcall(function()
+		debug.sethook(thread, function()
+			debug.sethook()
+			error("too many events", 2)
+		end, "", max_events)
+		ok, msg, errmsg = coroutine.resume(thread, func)
+		debug.sethook()
+	end)
 	if ok and msg and type(msg) == "number" and msg >= 0 then
 		minetest.after(msg, run, id, thread)
 	else
-		ent_to_node(id)
+		ent_to_node(id, errmsg)
 	end
 end
 
@@ -248,33 +261,37 @@ local function show_ask_close_formspec_node(player, pos)
 end
 
 local function on_node_receive_fields(player, pos, formname, fields)
+	local meta = minetest.get_meta(pos)
 	if formname == "inv" or formname == "help" then
 		if fields.back then
-			show_normal_formspec_node(player, pos, ask_close_code[player])
+			show_normal_formspec_node(player, pos, ask_close_code[player],
+					meta:get_string("msg"))
 			ask_close_code[player] = nil
 		elseif fields.quit then
 			minetest.after(0.1, show_normal_formspec_node, player, pos,
-					ask_close_code[player])
+					ask_close_code[player], meta:get_string("msg"))
 			ask_close_code[player] = nil
 		end
 		return
 	elseif formname == "ask_close" then
 		if fields.cancel then
-			show_normal_formspec_node(player, pos, ask_close_code[player])
+			show_normal_formspec_node(player, pos, ask_close_code[player],
+					meta:get_string("msg"))
 		elseif fields.save then
-			minetest.get_meta(pos):set_string("code", ask_close_code[player])
+			meta:set_string("msg", "")
+			meta:set_string("code", ask_close_code[player])
 		elseif not fields.discard and fields.quit then
 			minetest.after(0.1, show_normal_formspec_node, player, pos,
-					ask_close_code[player])
+					ask_close_code[player], meta:get_string("msg"))
 		end
 		ask_close_code[player] = nil
 		return
 	elseif formname ~= "" then
 		return
 	end
-	local meta = minetest.get_meta(pos)
 	if fields.save then
 		meta:set_string("code", fields.code)
+		meta:set_string("msg", "")
 		show_normal_formspec_node(player, pos, fields.code, "Code saved.")
 	elseif fields.inv then
 		ask_close_code[player] = fields.code
@@ -283,6 +300,12 @@ local function on_node_receive_fields(player, pos, formname, fields)
 		ask_close_code[player] = fields.code
 		show_help_formspec_node(player, pos)
 	elseif fields.run then
+		meta:set_string("msg", "")
+		if fields.code:byte(1) == 27 then
+			show_normal_formspec_node(player, pos, fields.code,
+					"Binary code prohibited.")
+			return
+		end
 		local func, msg = loadstring(fields.code)
 		if func then
 			minetest.close_formspec(player:get_player_name(),
@@ -293,6 +316,12 @@ local function on_node_receive_fields(player, pos, formname, fields)
 			show_normal_formspec_node(player, pos, fields.code, msg)
 		end
 	elseif fields.interpret then
+		meta:set_string("msg", "")
+		if fields.code:byte(1) == 27 then
+			show_normal_formspec_node(player, pos, fields.code,
+					"Binary code prohibited.")
+			return
+		end
 		local func, msg = loadstring(fields.code)
 		if func then
 			meta:set_string("code", fields.code)
@@ -362,7 +391,7 @@ local function on_entity_receive_fields(player, id, formname, fields)
 		elseif fields.help then
 			show_help_formspec_entity(player, id)
 		elseif fields.stop then
-			ent_to_node(id)
+			ent_to_node(id, "manually stopped.")
 		end
 	end
 end
@@ -420,8 +449,12 @@ minetest.register_node("samer:samer", {
 	end,
 
 	on_rightclick = function(pos, node, clicker, itemstack, pointed_thing)
+		if not clicker or not clicker:is_player() then
+			return
+		end
+		local meta = minetest.get_meta(pos)
 		show_normal_formspec_node(clicker, pos,
-				minetest.get_meta(pos):get_string("code"))
+				meta:get_string("code"), meta:get_string("msg"))
 		return itemstack
 	end,
 
@@ -472,11 +505,14 @@ minetest.register_entity("samer:samer", {
 			waiting_threads[id] = nil
 		elseif stop then
 			self.inv_content = s.inv_content
-			ent_to_node(self.id)
+			ent_to_node(self.id, "stopped because of server shutdown")
 		end
 	end,
 
 	on_rightclick = function(self, clicker)
+		if not clicker or not clicker:is_player() then
+			return
+		end
 		show_normal_formspec_entity(clicker, self.id, self.code)
 	end,
 
