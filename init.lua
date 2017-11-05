@@ -14,6 +14,14 @@ local function get_code(id)
 	return minetest.luaentities[samer_ids[id]].code
 end
 
+local function yaw_to_param2(yaw)
+	return (-2 * (yaw / math.pi - 2)) % 4
+end
+
+local function param2_to_yaw(param2)
+	return (2 - param2 / 2) * math.pi
+end
+
 local function transfer_inv(inv, old_inv)
 	local old_lists = old_inv:get_lists()
 	for listname, _ in pairs(old_lists) do
@@ -47,7 +55,7 @@ local function node_to_ent(pos, meta, code)
 	if not id then
 		return
 	end
-	samer:set_yaw(minetest.get_node(pos).param2 * math.pi / 2)
+	samer:set_yaw(param2_to_yaw(minetest.get_node(pos).param2))
 	samer_ids[id] = id
 	local inv = minetest.create_detached_inventory("samer:samer"..id, {})
 	transfer_inv(inv, meta:get_inventory())
@@ -60,7 +68,7 @@ local function ent_to_node(id)
 	local obj = luaent.object
 	local pos = obj:get_pos()
 	minetest.set_node(pos,
-			{name = "samer:samer", param2 = obj:get_yaw() / math.pi * 2})
+			{name = "samer:samer", param2 = yaw_to_param2(obj:get_yaw())})
 	local meta = minetest.get_meta(pos)
 	meta:set_string("code", luaent.code)
 	local old_inv = get_inv(id)
@@ -79,13 +87,51 @@ end
 local waiting_threads = {}
 
 local function create_environment(id)
-	-- todo
+	-- todo: finish this
 	local env = {
 		sleep = coroutine.yield,
+		say = function(msg)
+			minetest.chat_send_all("<samer> "..msg)
+		end,
+		get_pos = function()
+			return minetest.object_refs[samer_ids[id]]:get_pos()
+		end,
+		get_yaw = function()
+			return minetest.object_refs[samer_ids[id]]:get_yaw()
+		end,
+		move = function()
+			local obj = minetest.object_refs[samer_ids[id]]
+			local dir = minetest.yaw_to_dir(obj:get_yaw())
+			local new_pos = vector.add(obj:get_pos(), dir)
+			local node_def = minetest.registered_nodes[minetest.get_node(new_pos).name]
+			if not node_def or node_def.walkable then
+				return false
+			end
+			local speed = 1
+			obj:set_velocity(vector.multiply(dir, speed))
+			coroutine.yield(1 / speed)
+			obj:set_velocity(vector.new())
+			obj:set_pos(new_pos)
+			return true
+		end,
+		turn = function(dir)
+			if type(dir) ~= "number" then
+				error()
+			end
+			dir = math.sign(dir)
+			local obj = minetest.object_refs[samer_ids[id]]
+			obj:set_yaw(obj:get_yaw() + dir * math.pi / 2)
+			coroutine.yield(0.5)
+		end,
+		dig = function()
+			local obj = minetest.object_refs[samer_ids[id]]
+			local dir = minetest.yaw_to_dir(obj:get_yaw())
+			local node_pos = vector.add(obj:get_pos(), dir)
+			minetest.remove_node(node_pos)
+			coroutine.yield(0.5)
+		end,
 	}
-	env.say = function(msg)
-		minetest.chat_send_all("<samer> "..msg)
-	end
+	env._G = env
 	return env
 end
 
