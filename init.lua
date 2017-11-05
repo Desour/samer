@@ -2,45 +2,89 @@ local load_time_start = os.clock()
 local modname = minetest.get_current_modname()
 
 
-local samers = {}
+-- entity helpers:
 
+local samer_ids = {} -- This stores active_object_ids.
 
-local function create_environment(pos)
-	local env = {
-		pos = vector.new(pos),
-		sleep = coroutine.yield,
-		say = minetest.chat_send_all,
-	}
-	env.dig = function()
-		local dir = minetest.facedir_to_dir(minetest.get_node(env.pos).param2)
-		local node_pos = vector.add(env.pos, dir)
-		minetest.remove_node(node_pos)
-		coroutine.yield(1)
+local function get_inv(id)
+	return minetest.get_inventory({type = "detached", name = "samer:samer"..id})
+end
+
+local function get_code(id)
+	return minetest.luaentities[samer_ids[id]].code
+end
+
+local function transfer_inv(inv, old_inv)
+	local old_lists = old_inv:get_lists()
+	for listname, _ in pairs(old_lists) do
+		inv:set_size(listname, old_inv:get_size(listname))
 	end
-	env.move = function()
-		local samer = minetest.get_node(env.pos)
-		local dir = minetest.facedir_to_dir(samer.param2)
-		local new_pos = vector.add(env.pos, dir)
-		if minetest.get_node(new_pos).name ~= "air" then
-			return
+	inv:set_lists(old_lists)
+end
+
+local function inv_content_to_inv(inv, inv_content)
+	for listname, list in pairs(inv_content) do
+		inv:set_size(listname, #list)
+		for i = 1, #list do
+			list[i] = ItemStack(list[i])
 		end
-		minetest.set_node(new_pos, samer)
-		local meta_old = minetest.get_meta(env.pos)
-		local meta_new = minetest.get_meta(new_pos)
-		meta_new:from_table(meta_old:to_table())
-		local inv_old = meta_old:get_inventory()
-		local inv_new = meta_old:get_inventory()
-		inv_new:set_lists(inv_old:get_lists())
-		minetest.remove_node(env.pos)
-		env.pos = new_pos
-		coroutine.yield(1)
+		inv:set_list(listname, list)
 	end
-	env.turn = function(dir)
-		dir = math.sign(dir)
-		local samer = minetest.get_node(env.pos)
-		samer.param2 = (samer.param2 + dir) % 4
-		minetest.swap_node(pos, samer)
-		coroutine.yield(0.5)
+end
+
+local function node_to_ent(pos, meta, code)
+	local samer = minetest.add_entity(pos, "samer:samer", minetest.serialize({
+		code = code,
+		id = -1, -- The entity gets its id by itself on_activate.
+	}))
+	local id
+	for i, obj in pairs(minetest.object_refs) do
+		if obj == samer then
+			id = i
+			break
+		end
+	end
+	if not id then
+		return
+	end
+	samer:set_yaw(minetest.get_node(pos).param2 * math.pi / 2)
+	samer_ids[id] = id
+	local inv = minetest.create_detached_inventory("samer:samer"..id, {})
+	transfer_inv(inv, meta:get_inventory())
+	minetest.remove_node(pos)
+	return id
+end
+
+local function ent_to_node(id)
+	local luaent = minetest.luaentities[samer_ids[id]]
+	local obj = luaent.object
+	local pos = obj:get_pos()
+	minetest.set_node(pos,
+			{name = "samer:samer", param2 = obj:get_yaw() / math.pi * 2})
+	local meta = minetest.get_meta(pos)
+	meta:set_string("code", luaent.code)
+	local old_inv = get_inv(id)
+	local inv = meta:get_inventory()
+	if old_inv then
+		transfer_inv(inv, old_inv)
+	else
+		inv_content_to_inv(inv, luaent.inv_content)
+	end
+	obj:remove()
+end
+
+
+-- running the code:
+
+local waiting_threads = {}
+
+local function create_environment(id)
+	-- todo
+	local env = {
+		sleep = coroutine.yield,
+	}
+	env.say = function(msg)
+		minetest.chat_send_all("<samer> "..msg)
 	end
 	return env
 end
@@ -48,16 +92,19 @@ end
 local function create_thread(func, env)
 	-- todo: do more for safety
 	setfenv(func, env)
-	-- todo: make to entity
 	return coroutine.create(pcall), func
 end
 
-local function run(thread, func)
+local function run(id, thread, func)
+	if not minetest.object_refs[samer_ids[id]] then  -- samer unloaded
+		waiting_threads[id] = thread
+		return
+	end
 	local ok, msg = coroutine.resume(thread, func)
-	if ok and msg and type(msg) == "number" and msg > 0 then
-		minetest.after(msg, run, thread)
+	if ok and msg and type(msg) == "number" and msg >= 0 then
+		minetest.after(msg, run, id, thread)
 	else
-		-- todo: make to node
+		ent_to_node(id)
 	end
 end
 
@@ -150,8 +197,8 @@ local function on_node_receive_fields(player, pos, formname, fields)
 		if func then
 			minetest.close_formspec(player:get_player_name(),
 					"samer:node"..minetest.pos_to_string(pos))
-			meta:set_string("code", fields.code)
-			local ok = run(create_thread(func, create_environment(pos)))
+			local id = node_to_ent(pos, meta, fields.code)
+			run(id, create_thread(func, create_environment(id)))
 		else
 			show_normal_formspec_node(player, pos, fields.code, msg)
 		end
@@ -175,7 +222,7 @@ local function on_node_receive_fields(player, pos, formname, fields)
 	end
 end
 
-local function show_normal_formspec_etity(player, id, code)
+local function show_normal_formspec_entity(player, id)
 	minetest.show_formspec(player:get_player_name(),
 			"samer:entity("..id..")",
 		"size[15,11]"..
@@ -183,7 +230,7 @@ local function show_normal_formspec_etity(player, id, code)
 		"button_exit[0,10;3,1;exit;Exit]"..
 		"button_exit[14.6,0;0.5,0.5;x;X]"..
 		"label[0,6;Running...]"..
-		"textarea[4,0;11,13;code;;"..minetest.formspec_escape(code).."]"..
+		"textarea[4,0;11,13;code;;"..minetest.formspec_escape(get_code(id)).."]"..
 		default.gui_bg..
 		default.gui_bg_img
 	)
@@ -191,7 +238,7 @@ end
 
 local function show_inventory_formspec_entity(player, id)
 	minetest.show_formspec(player:get_player_name(),
-			"samer:node("..id..")inv",
+			"samer:entity("..id..")inv",
 		"size[8,9]"..
 		"button[0,8.2;2,1;back;Back]"..
 		"list[current_player;main;0,3.85;8,1;]"..
@@ -208,9 +255,9 @@ end
 local function on_entity_receive_fields(player, id, formname, fields)
 	if formname == "inv" then
 		if fields.back then
-			show_normal_formspec_entity(player, id, samers[id].code)
+			show_normal_formspec_entity(player, id)
 		elseif fields.quit then
-			minetest.after(show_normal_formspec_entity, player, id, samers[id].code)
+			minetest.after(show_normal_formspec_entity, player, id)
 		end
 	elseif formname == "" and fields.inv then
 		show_inventory_formspec_entity(player, id)
@@ -268,11 +315,13 @@ minetest.register_node("samer:samer", {
 		meta:set_string("code", "")
 		meta:get_inventory():set_size("main", 6*3)
 	end,
+
 	on_rightclick = function(pos, node, clicker, itemstack, pointed_thing)
 		show_normal_formspec_node(clicker, pos,
 				minetest.get_meta(pos):get_string("code"))
 		return itemstack
 	end,
+
 	on_rotate = minetest.global_exists("screwdriver") and screwdriver.rotate_simple,
 })
 
@@ -297,41 +346,56 @@ minetest.register_entity("samer:samer", {
 
 	on_activate = function(self, staticdata, dtime_s)
 		local s = minetest.deserialize(staticdata)
-		if not s then
+		if not s or not s.id then
 			self.object:remove()
 			return
 		end
 		self.code = s.code
-		self.owner = s.owner
 		self.id = s.id
-		--[[
-		if not samers[self.id] then -- samer from last game
-			--~ self.inv = create_inv(self.id, s.inv_content)
-		elseif not self.id then -- new samer
-			self.id = #samers + 1
-			--~ self.inv = create_inv(self.id)
-		else
-			--~ self.inv = minetest.get_inventory({type="detached", name="samer:samer"..self.id})
-		end]]
+		local stop = false
+		for i, luaent in pairs(minetest.luaentities) do
+			if luaent == self then
+				if self.id == -1 then -- new samer
+					self.id = i
+				elseif not samer_ids[self.id] then -- samer from last game
+					stop = true
+				end
+				samer_ids[self.id] = i
+				break
+			end
+		end
+		if waiting_threads[self.id] then -- samer was unloaded but can continue now
+			run(self.id, waiting_threads[self.id])
+			waiting_threads[id] = nil
+		elseif stop then
+			self.inv_content = s.inv_content
+			ent_to_node(self.id)
+		end
 	end,
-	--~ on_step = function(self, dtime),
-	--~ on_punch = function(self, puncher, time_from_last_punch, tool_capabilities, dir),
+
+	on_punch = function(self, puncher, time_from_last_punch, tool_capabilities, dir)
+		-- do not die
+	end,
+
 	on_rightclick = function(self, clicker)
-		show_normal_formspec_etity(clicker, self.id, self.code)
+		show_normal_formspec_entity(clicker, self.id, self.code)
 	end,
+
 	get_staticdata = function(self)
-		--~ local inv_content = {}
-		--~ for listname, list in pairs(self.inv:get_lists()) do
-			--~ inv_content[listname] = {}
-			--~ for i = 1, #list do
-				--~ inv_content[listname][i] = list[i]:to_string()
-			--~ end
-		--~ end
+		local inv_content = {}
+		local inv = get_inv(self.id)
+		if inv then
+			for listname, list in pairs(inv:get_lists()) do
+				inv_content[listname] = {}
+				for i = 1, #list do
+					inv_content[listname][i] = list[i]:to_string()
+				end
+			end
+		end
 		return minetest.serialize({
 			code = self.code,
-			owner = self.owner,
 			id = self.id,
-			--~ inv_content = inv_content,
+			inv_content = inv_content,
 		})
 	end,
 })
