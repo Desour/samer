@@ -273,7 +273,7 @@ minetest.register_node("samer:samer", {
 				minetest.get_meta(pos):get_string("code"))
 		return itemstack
 	end,
-	on_rotate = screwdriver.rotate_simple,
+	on_rotate = minetest.global_exists("screwdriver") and screwdriver.rotate_simple,
 })
 
 
