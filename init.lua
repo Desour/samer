@@ -77,6 +77,9 @@ local function ent_to_node(id, msg)
 	local luaent = minetest.luaentities[samer_ids[id]]
 	local obj = luaent.object
 	local pos = obj:get_pos()
+	while minetest.get_node(pos).name ~= "air" do
+		pos.y = pos.y + 1
+	end
 	minetest.set_node(pos,
 			{name = "samer:samer", param2 = yaw_to_param2(obj:get_yaw())})
 	local meta = minetest.get_meta(pos)
@@ -100,8 +103,95 @@ local max_events = tonumber(minetest.settings:get("samer.max_events")) or 10000
 local waiting_threads = {}
 
 local function create_environment(id)
-	-- todo: finish this
 	local env = {
+		assert = assert,
+		error = error,
+		ipairs = ipairs,
+		next = next,
+		pairs = pairs,
+		select = select,
+		tonumber = tonumber,
+		tostring = tostring,
+		type = type,
+		unpack = unpack,
+		_VERSION = _VERSION,
+		string = {
+			byte = string.byte,
+			char = string.char,
+			format = string.format,
+			len = string.len,
+			lower = string.lower,
+			upper = string.upper,
+			reverse = string.reverse,
+			sub = string.sub,
+		},
+		math = {
+			abs = math.abs,
+			acos = math.acos,
+			asin = math.asin,
+			atan = math.atan,
+			atan2 = math.atan2,
+			ceil = math.ceil,
+			cos = math.cos,
+			cosh = math.cosh,
+			deg = math.deg,
+			exp = math.exp,
+			floor = math.floor,
+			fmod = math.fmod,
+			frexp = math.frexp,
+			huge = math.huge,
+			ldexp = math.ldexp,
+			log = math.log,
+			log10 = math.log10,
+			max = math.max,
+			min = math.min,
+			modf = math.modf,
+			pi = math.pi,
+			pow = math.pow,
+			rad = math.rad,
+			random = math.random,
+			sin = math.sin,
+			sinh = math.sinh,
+			sqrt = math.sqrt,
+			tan = math.tan,
+			tanh = math.tanh,
+			sign = math.sign,
+		},
+		table = {
+			concat = table.concat,
+			insert = table.insert,
+			maxn = table.maxn,
+			remove = table.remove,
+			sort = table.sort,
+		},
+		os = {
+			clock = os.clock,
+			difftime = os.difftime,
+			time = os.time,
+		},
+		pos_to_string = minetest.pos_to_string,
+		string_to_pos = minetest.string_to_pos,
+		string_to_area = minetest.string_to_area,
+		is_yes = minetest.is_yes,
+		hash_node_position = minetest.hash_node_position,
+		get_position_from_hash = minetest.get_position_from_hash,
+		vector = {
+			new = vector.new,
+			direction = vector.direction,
+			distance = vector.distance,
+			length = vector.length,
+			normalize = vector.normalize,
+			floor = vector.floor,
+			round = vector.round,
+			apply = vector.apply,
+			equals = vector.equals,
+			sort = vector.sort,
+			add = vector.add,
+			subtract = vector.subtract,
+			multiply = vector.multiply,
+			divide = vector.divide,
+		},
+
 		sleep = coroutine.yield,
 		say = function(msg)
 			minetest.chat_send_all("<samer> "..msg)
@@ -112,9 +202,30 @@ local function create_environment(id)
 		get_yaw = function()
 			return minetest.object_refs[samer_ids[id]]:get_yaw()
 		end,
-		move = function()
+		get_node = function(a)
+			if a and type(a) ~= "number" then
+				error("attempt to call move with "..tostring(a), 2)
+			end
 			local obj = minetest.object_refs[samer_ids[id]]
-			local dir = minetest.yaw_to_dir(obj:get_yaw())
+			local dir
+			if a and (a > 0 or a < 0) then
+				dir = vector.new(0, math.sign(a), 0)
+			else
+				dir = minetest.yaw_to_dir(obj:get_yaw())
+			end
+			return minetest.get_node(vector.add(obj:get_pos(), dir))
+		end,
+		move = function(a)
+			if a and type(a) ~= "number" then
+				error("attempt to call move with "..tostring(a), 2)
+			end
+			local obj = minetest.object_refs[samer_ids[id]]
+			local dir
+			if a and (a > 0 or a < 0) then
+				dir = vector.new(0, math.sign(a), 0)
+			else
+				dir = minetest.yaw_to_dir(obj:get_yaw())
+			end
 			local new_pos = vector.add(obj:get_pos(), dir)
 			local node_def = minetest.registered_nodes[minetest.get_node(new_pos).name]
 			if not node_def or node_def.walkable then
@@ -131,21 +242,30 @@ local function create_environment(id)
 		end,
 		turn = function(dir)
 			if type(dir) ~= "number" then
-				error("attempt to turn with "..tostring(dir), 2)
+				error("attempt to call turn with "..tostring(dir), 2)
 			end
 			dir = math.sign(dir)
 			local obj = minetest.object_refs[samer_ids[id]]
 			obj:set_yaw(obj:get_yaw() + dir * math.pi / 2)
 			coroutine.yield(0.5)
 		end,
-		dig = function()
+		dig = function(a)
+			if a and type(a) ~= "number" then
+				error("attempt to call move with "..tostring(a), 2)
+			end
 			local obj = minetest.object_refs[samer_ids[id]]
-			local dir = minetest.yaw_to_dir(obj:get_yaw())
+			local dir
+			if a and (a > 0 or a < 0) then
+				dir = vector.new(0, math.sign(a), 0)
+			else
+				dir = minetest.yaw_to_dir(obj:get_yaw())
+			end
 			local node_pos = vector.add(obj:get_pos(), dir)
-			minetest.remove_node(node_pos)
+			local s = minetest.dig_node(pos)
 			set_anim(obj, "mine")
 			coroutine.yield(1)
 			set_anim(obj, "stand")
+			return s
 		end,
 	}
 	env._G = env
@@ -185,13 +305,20 @@ end
 -- formspec stuff:
 
 local help = {
-	"sleep(time)",
-	"say(msg)",
+	"sleep(number time)",
+	"say(string msg)",
 	"get_pos()",
+	"  Gives the current position as vector.",
 	"get_yaw()",
-	"move()",
-	"turn(dir)",
-	"dig()",
+	"  Gives the current yaw, a value between 0 and 2 pi.",
+	"get_node([number a])",
+	"  a: 1 = up, 0 = forward, -1 = down",
+	"move([number a])",
+	"  a is like the get_node a.",
+	"turn(number dir)",
+	"  Make dir 1 to turn left or -1 to turn right.",
+	"dig([number a])",
+	"  a is like the get_node a.",
 }
 
 local help_formspec = "size[8,9]"..
@@ -502,7 +629,7 @@ minetest.register_entity("samer:samer", {
 		end
 		if waiting_threads[self.id] then -- samer was unloaded but can continue now
 			run(self.id, waiting_threads[self.id])
-			waiting_threads[id] = nil
+			waiting_threads[self.id] = nil
 		elseif stop then
 			self.inv_content = s.inv_content
 			ent_to_node(self.id, "stopped because of server shutdown")
