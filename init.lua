@@ -157,6 +157,27 @@ end
 
 -- formspec stuff:
 
+local help = {
+	"sleep(time)",
+	"say(msg)",
+	"get_pos()",
+	"get_yaw()",
+	"move()",
+	"turn(dir)",
+	"dig()",
+}
+
+local help_formspec = "size[8,9]"..
+	"textlist[0,0;8,8;text;"
+for i = 1, #help do
+	help_formspec = help_formspec..help[i]..","
+end
+help_formspec = help_formspec:sub(1, -2).. -- remove the last ","
+	"]"..
+	"button[0,8.2;2,1;back;Back]"..
+	default.gui_bg..
+	default.gui_bg_img
+
 local ask_close_code = {}
 
 local function show_normal_formspec_node(player, pos, code, msg)
@@ -164,9 +185,10 @@ local function show_normal_formspec_node(player, pos, code, msg)
 			"samer:node"..minetest.pos_to_string(pos),
 		"size[15,11]"..
 		"button[0,2;3,1;inv;Inventory]"..
-		"button[0,3;3,1;save;Save]"..
-		"button[0,4;3,1;interpret;Interpret]"..
-		"button[0,5;3,1;run;Run]"..
+		"button[0,3;3,1;help;Help]"..
+		"button[0,4;3,1;save;Save]"..
+		"button[0,5;3,1;interpret;Interpret]"..
+		"button[0,6;3,1;run;Run]"..
 		"button[0,10;3,1;exit;Exit]"..
 		"button[14.6,0;0.5,0.5;x;X]"..
 		(msg and "label[0,6;"..minetest.formspec_escape(msg).."]" or "")..
@@ -193,6 +215,11 @@ local function show_inventory_formspec_node(player, pos)
 	)
 end
 
+local function show_help_formspec_node(player, pos)
+	minetest.show_formspec(player:get_player_name(),
+			"samer:node"..minetest.pos_to_string(pos).."help", help_formspec)
+end
+
 local function show_ask_close_formspec_node(player, pos)
 	minetest.show_formspec(player:get_player_name(),
 			"samer:node"..minetest.pos_to_string(pos).."ask_close",
@@ -207,7 +234,7 @@ local function show_ask_close_formspec_node(player, pos)
 end
 
 local function on_node_receive_fields(player, pos, formname, fields)
-	if formname == "inv" then
+	if formname == "inv" or formname == "help" then
 		if fields.back then
 			show_normal_formspec_node(player, pos, ask_close_code[player])
 			ask_close_code[player] = nil
@@ -238,6 +265,9 @@ local function on_node_receive_fields(player, pos, formname, fields)
 	elseif fields.inv then
 		ask_close_code[player] = fields.code
 		show_inventory_formspec_node(player, pos)
+	elseif fields.help then
+		ask_close_code[player] = fields.code
+		show_help_formspec_node(player, pos)
 	elseif fields.run then
 		local func, msg = loadstring(fields.code)
 		if func then
@@ -273,6 +303,7 @@ local function show_normal_formspec_entity(player, id)
 			"samer:entity("..id..")",
 		"size[15,11]"..
 		"button[0,2;3,1;inv;Inventory]"..
+		"button[0,3;3,1;help;Help]"..
 		"button_exit[0,10;3,1;exit;Exit]"..
 		"button_exit[14.6,0;0.5,0.5;x;X]"..
 		"label[0,6;Running...]"..
@@ -298,15 +329,24 @@ local function show_inventory_formspec_entity(player, id)
 	)
 end
 
+local function show_help_formspec_entity(player, id)
+	minetest.show_formspec(player:get_player_name(),
+			"samer:entity("..id..")help", help_formspec)
+end
+
 local function on_entity_receive_fields(player, id, formname, fields)
-	if formname == "inv" then
+	if formname == "inv" or formname == "help" then
 		if fields.back then
 			show_normal_formspec_entity(player, id)
 		elseif fields.quit then
 			minetest.after(show_normal_formspec_entity, player, id)
 		end
-	elseif formname == "" and fields.inv then
-		show_inventory_formspec_entity(player, id)
+	elseif formname == "" then
+		if fields.inv then
+			show_inventory_formspec_entity(player, id)
+		elseif fields.help then
+			show_help_formspec_entity(player, id)
+		end
 	end
 end
 
