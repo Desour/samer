@@ -4,6 +4,16 @@ local modname = minetest.get_current_modname()
 
 -- entity helpers:
 
+local animations = {
+	stand = {{x =  0, y =  0},  0, 0, false},
+	walk  = {{x =  1, y = 20}, 30, 0, true},
+	mine  = {{x = 21, y = 32}, 30, 0, true},
+}
+
+local function set_anim(obj, animname)
+	obj:set_animation(unpack(animations[animname]))
+end
+
 local samer_ids = {} -- This stores active_object_ids.
 
 local function get_inv(id)
@@ -109,7 +119,9 @@ local function create_environment(id)
 			end
 			local speed = 1
 			obj:set_velocity(vector.multiply(dir, speed))
+			set_anim(obj, "walk")
 			coroutine.yield(1 / speed)
+			set_anim(obj, "stand")
 			obj:set_velocity(vector.new())
 			obj:set_pos(new_pos)
 			return true
@@ -128,7 +140,9 @@ local function create_environment(id)
 			local dir = minetest.yaw_to_dir(obj:get_yaw())
 			local node_pos = vector.add(obj:get_pos(), dir)
 			minetest.remove_node(node_pos)
-			coroutine.yield(0.5)
+			set_anim(obj, "mine")
+			coroutine.yield(1)
+			set_anim(obj, "stand")
 		end,
 	}
 	env._G = env
@@ -191,7 +205,7 @@ local function show_normal_formspec_node(player, pos, code, msg)
 		"button[0,6;3,1;run;Run]"..
 		"button[0,10;3,1;exit;Exit]"..
 		"button[14.6,0;0.5,0.5;x;X]"..
-		(msg and "label[0,6;"..minetest.formspec_escape(msg).."]" or "")..
+		(msg and "label[0,7;"..minetest.formspec_escape(msg).."]" or "")..
 		"textarea[4,0;11,13;code;;"..minetest.formspec_escape(code).."]"..
 		default.gui_bg..
 		default.gui_bg_img
@@ -304,9 +318,10 @@ local function show_normal_formspec_entity(player, id)
 		"size[15,11]"..
 		"button[0,2;3,1;inv;Inventory]"..
 		"button[0,3;3,1;help;Help]"..
+		"button_exit[0,6;3,1;stop;Stop]"..
 		"button_exit[0,10;3,1;exit;Exit]"..
 		"button_exit[14.6,0;0.5,0.5;x;X]"..
-		"label[0,6;Running...]"..
+		"label[0,7;Running...]"..
 		"textarea[4,0;11,13;code;;"..minetest.formspec_escape(get_code(id)).."]"..
 		default.gui_bg..
 		default.gui_bg_img
@@ -346,6 +361,8 @@ local function on_entity_receive_fields(player, id, formname, fields)
 			show_inventory_formspec_entity(player, id)
 		elseif fields.help then
 			show_help_formspec_entity(player, id)
+		elseif fields.stop then
+			ent_to_node(id)
 		end
 	end
 end
@@ -457,10 +474,6 @@ minetest.register_entity("samer:samer", {
 			self.inv_content = s.inv_content
 			ent_to_node(self.id)
 		end
-	end,
-
-	on_punch = function(self, puncher, time_from_last_punch, tool_capabilities, dir)
-		-- do not die
 	end,
 
 	on_rightclick = function(self, clicker)
