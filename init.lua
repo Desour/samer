@@ -261,7 +261,7 @@ local function create_environment(id)
 				dir = minetest.yaw_to_dir(obj:get_yaw())
 			end
 			local node_pos = vector.add(obj:get_pos(), dir)
-			local s = minetest.dig_node(pos)
+			local s = minetest.dig_node(node_pos)
 			set_anim(obj, "mine")
 			coroutine.yield(1)
 			set_anim(obj, "stand")
@@ -304,29 +304,26 @@ end
 
 -- formspec stuff:
 
-local help = {
-	"sleep(number time)",
-	"say(string msg)",
-	"get_pos()",
-	"  Gives the current position as vector.",
-	"get_yaw()",
-	"  Gives the current yaw, a value between 0 and 2 pi.",
-	"get_node([number a])",
-	"  a: 1 = up, 0 = forward, -1 = down",
-	"move([number a])",
-	"  a is like the get_node a.",
-	"turn(number dir)",
-	"  Make dir 1 to turn left or -1 to turn right.",
-	"dig([number a])",
-	"  a is like the get_node a.",
-}
+local help_text = [[
+sleep(number time)
+say(string msg)
+get_pos()
+  Gives the current position as vector.
+get_yaw()
+  Gives the current yaw, a value between 0 and 2 pi.
+get_node([number a])
+  a: 1 = up, 0 or nil = forward, -1 = down
+move([number a])
+  a is like the get_node a.
+turn(number dir)
+  Make dir 1 to turn left or -1 to turn right.
+dig([number a])
+  a is like the get_node a.
+]]
 
 local help_formspec = "size[8,9]"..
-	"textlist[0,0;8,8;text;"
-for i = 1, #help do
-	help_formspec = help_formspec..help[i]..","
-end
-help_formspec = help_formspec:sub(1, -2).. -- remove the last ","
+	"textlist[0,0;8,8;text;"..
+		string.gsub(minetest.formspec_escape(help_text), "\n", ",")..
 	"]"..
 	"button[0,8.2;2,1;back;Back]"..
 	default.gui_bg..
