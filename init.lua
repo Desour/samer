@@ -366,9 +366,14 @@ local function show_inventory_formspec_node(player, pos)
 	)
 end
 
-local function show_help_formspec_node(player, pos)
+local function show_help_formspec_node(player, pos, line_to_copy)
+	line_to_copy = line_to_copy and "field[2.5,8.6;6,1;copy_field;Copy from here.;"..
+		minetest.formspec_escape(
+			help_text:split("\n", false, line_to_copy)[line_to_copy] or ""
+		).."]" or ""
 	minetest.show_formspec(player:get_player_name(),
-			"samer:node"..minetest.pos_to_string(pos).."help", help_formspec)
+			"samer:node"..minetest.pos_to_string(pos).."help",
+			help_formspec..line_to_copy)
 end
 
 local function show_ask_close_formspec_node(player, pos)
@@ -395,6 +400,9 @@ local function on_node_receive_fields(player, pos, formname, fields)
 			minetest.after(0.1, show_normal_formspec_node, player, pos,
 					ask_close_code[player], meta:get_string("msg"))
 			ask_close_code[player] = nil
+		elseif formname == "help" and fields.text
+				and fields.text:sub(1, 4) == "DCL:" then
+			show_help_formspec_node(player, pos, tonumber(fields.text:sub(5)))
 		end
 		return
 	elseif formname == "ask_close" then
@@ -497,9 +505,14 @@ local function show_inventory_formspec_entity(player, id)
 	)
 end
 
-local function show_help_formspec_entity(player, id)
+local function show_help_formspec_entity(player, id, line_to_copy)
+	line_to_copy = line_to_copy and "field[2.5,8.6;6,1;copy_field;Copy from here.;"..
+		minetest.formspec_escape(
+			help_text:split("\n", false, line_to_copy)[line_to_copy] or ""
+		).."]" or ""
 	minetest.show_formspec(player:get_player_name(),
-			"samer:entity("..id..")help", help_formspec)
+			"samer:entity("..id..")help",
+			help_formspec..line_to_copy)
 end
 
 local function on_entity_receive_fields(player, id, formname, fields)
@@ -508,6 +521,9 @@ local function on_entity_receive_fields(player, id, formname, fields)
 			show_normal_formspec_entity(player, id)
 		elseif fields.quit then
 			minetest.after(show_normal_formspec_entity, player, id)
+		elseif formname == "help" and fields.text
+				and fields.text:sub(1, 4) == "DCL:" then
+			show_help_formspec_entity(player, id, tonumber(fields.text:sub(5)))
 		end
 	elseif formname == "" then
 		if fields.inv then
